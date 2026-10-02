@@ -1,0 +1,15 @@
+*{box-sizing:border-box}
+body{margin:0;background:#111827;color:white;font-family:Arial,sans-serif;display:flex;justify-content:center}
+.game{width:min(100vw,500px);min-height:100vh;display:flex;flex-direction:column}
+.top-bar{height:60px;display:flex;align-items:center;justify-content:space-around;background:#1f2937;border-bottom:1px solid #374151}
+#game-board{width:100%;aspect-ratio:10/13;display:grid;grid-template-columns:repeat(10,1fr);grid-template-rows:repeat(13,1fr);background:#374151}
+.cell{position:relative;border:1px solid #4b5563;background:#263244;display:flex;align-items:center;justify-content:center;font-size:clamp(10px,3vw,18px)}
+.building{width:90%;height:90%;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:clamp(10px,3vw,18px);user-select:none}
+.wall{background:#6b7280}.turret{background:#2563eb}.ice{background:#06b6d4}
+.core{background:#f59e0b;width:90%;height:90%;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:clamp(10px,4vw,22px)}
+.enemy{width:70%;height:70%;border-radius:50%;background:#ef4444;z-index:5}
+.build-menu{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px;background:#1f2937}
+.build-menu button{min-height:55px;border:none;border-radius:8px;background:#374151;color:white;cursor:pointer;font-size:13px}
+.build-menu button:hover{background:#4b5563}.build-menu button.selected{outline:3px solid #fbbf24}
+.build-menu span{display:block;margin-top:4px;color:#fbbf24}
+#status{min-height:40px;padding:10px;text-align:center;background:#111827;color:#d1d5db}
