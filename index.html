@@ -6,21 +6,45 @@
 <title>快点盖呀 - Prototype</title>
 <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
+
 <div class="game">
+
 <header class="top-bar">
-<div><strong>快点盖呀</strong></div>
-<div>Gold: <span id="gold">300</span></div>
-<div>Wave: <span id="wave">1</span>/8</div>
+    <div><strong>快点盖呀</strong></div>
+    <div>Gold: <span id="gold">500</span></div>
+    <div>Wave: <span id="wave">1</span>/8</div>
 </header>
+
 <main id="game-board"></main>
+
 <section class="build-menu">
-<button data-building="wall">🧱 Wall<span>30G</span></button>
-<button data-building="turret">🔫 Machine Gun<span>60G</span></button>
-<button data-building="ice">❄️ Ice Tower<span>80G</span></button>
+
+    <button data-building="wall">
+        🧱 Wall
+        <span>20G</span>
+    </button>
+
+    <button data-building="turret">
+        🔫 Machine Gun
+        <span>60G</span>
+    </button>
+
+    <button data-building="ice">
+        ❄️ Ice Tower
+        <span>80G</span>
+    </button>
+
 </section>
-<div id="status">Select a building.</div>
+
+<div id="status">
+    准备开始。你有 500 Gold，可以自由布置基地。
 </div>
+
+</div>
+
 <script src="game.js"></script>
+
 </body>
 </html>
