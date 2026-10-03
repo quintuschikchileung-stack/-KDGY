@@ -2,49 +2,45 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>快点盖呀 - Prototype</title>
 <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
-
 <div class="game">
-
 <header class="top-bar">
-    <div><strong>快点盖呀</strong></div>
-    <div>Gold: <span id="gold">500</span></div>
-    <div>Wave: <span id="wave">1</span>/8</div>
+  <div class="title">快点盖呀</div>
+  <div>💰 <span id="gold">500</span></div>
+  <div>🌊 <span id="wave">1</span>/8</div>
 </header>
-
+<div class="hud">
+  <div>核心 HP <strong><span id="core-hp">1000</span>/1000</strong></div>
+  <div id="phase-label">准备阶段</div>
+  <div>敌人 <strong id="enemy-count">0</strong></div>
+</div>
 <main id="game-board"></main>
-
 <section class="build-menu">
-
-    <button data-building="wall">
-        🧱 Wall
-        <span>20G</span>
-    </button>
-
-    <button data-building="turret">
-        🔫 Machine Gun
-        <span>60G</span>
-    </button>
-
-    <button data-building="ice">
-        ❄️ Ice Tower
-        <span>80G</span>
-    </button>
-
+  <button type="button" data-building="wall"><b>🧱 墙</b><span>20G</span></button>
+  <button type="button" data-building="turret"><b>🔫 机枪塔</b><span>60G</span></button>
+  <button type="button" data-building="ice"><b>❄️ 冰冻塔</b><span>80G</span></button>
+  <button type="button" data-building="economy"><b>🏦 经济建筑</b><span>150G</span></button>
 </section>
-
-<div id="status">
-    准备开始。你有 500 Gold，可以自由布置基地。
+<section class="actions">
+  <button type="button" id="start-wave" class="primary">开始第 1 波</button>
+  <button type="button" id="upgrade" disabled>升级</button>
+  <button type="button" id="demolish" disabled>拆除</button>
+  <button type="button" id="restart">重新开始</button>
+</section>
+<div id="selection-panel" class="selection-panel">点击建筑查看详情。</div>
+<div id="status" aria-live="polite">准备开始。先布置你的基地。</div>
+<div id="buff-modal" class="modal hidden">
+  <div class="modal-card">
+    <h2>波次奖励</h2>
+    <p>选择一个临时强化：</p>
+    <div id="buff-options"></div>
+  </div>
 </div>
-
 </div>
-
 <script src="game.js"></script>
-
 </body>
 </html>
