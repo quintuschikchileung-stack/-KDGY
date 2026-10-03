@@ -1,233 +1,415 @@
 const ROWS = 13;
 const COLS = 10;
 const CORE_ROW = ROWS - 1;
-const STARTING_GOLD = 300;
+
+const STARTING_GOLD = 500;
+const CORE_MAX_HP = 1000;
 const TOTAL_WAVES = 8;
 
 const BUILDINGS = {
     wall: {
         name: "Wall",
-        cost: 30,
         symbol: "🧱",
-        type: "defense",
-        maxHp: 220
+        cost: 20,
+        maxHp: 220,
+        type: "defense"
     },
 
     turret: {
         name: "Machine Gun",
-        cost: 60,
         symbol: "🔫",
+        cost: 60,
+        maxHp: 100,
         type: "attack",
-        damage: 10,
-        range: 4.5,
+        damage: 12,
         attackCooldown: 700,
-        maxHp: 100
+        range: 4.5
     },
 
     ice: {
         name: "Ice Tower",
-        cost: 80,
         symbol: "❄️",
+        cost: 80,
+        maxHp: 100,
         type: "attack",
-        damage: 5,
-        range: 4.5,
+        damage: 7,
         attackCooldown: 1200,
-        maxHp: 100
+        range: 4.5,
+        slow: 0.45,
+        slowDuration: 1800
+    },
+
+    economy: {
+        name: "Economy Building",
+        symbol: "🏦",
+        cost: 150,
+        maxHp: 180,
+        type: "economy",
+        income: 150
     }
 };
 
-const WAVE_DATA = [
-    { enemies: 5, hp: 35, speed: 1.2 },
-    { enemies: 7, hp: 45, speed: 1.25 },
-    { enemies: 9, hp: 55, speed: 1.3 },
-    { enemies: 11, hp: 70, speed: 1.35 },
-    { enemies: 13, hp: 85, speed: 1.4 },
-    { enemies: 15, hp: 100, speed: 1.45 },
-    { enemies: 18, hp: 120, speed: 1.5 },
-    { enemies: 1, hp: 650, speed: 0.8, boss: true }
+
+/* =========================
+   Wave Settings
+========================= */
+
+const WAVE_CONFIG = [
+    { enemies: 15, elites: 0, hp: 30 },
+    { enemies: 20, elites: 0, hp: 35 },
+    { enemies: 25, elites: 1, hp: 40 },
+    { enemies: 30, elites: 1, hp: 45 },
+    { enemies: 35, elites: 2, hp: 50 },
+    { enemies: 40, elites: 2, hp: 60 },
+    { enemies: 50, elites: 3, hp: 70 },
+    { enemies: 35, elites: 0, hp: 80, boss: true }
 ];
 
-const gameState = {
+
+/* =========================
+   3 Choice Buffs
+========================= */
+
+const BUFFS = [
+
+    {
+        name: "🔥 火力提升",
+        desc: "所有攻击建筑伤害 +15%",
+        apply: s => s.damageMul *= 1.15
+    },
+
+    {
+        name: "⚡ 极速射击",
+        desc: "所有攻击建筑攻速 +12%",
+        apply: s => s.attackSpeedMul *= 1.12
+    },
+
+    {
+        name: "🧱 加固工程",
+        desc: "所有建筑最大生命 +25%",
+        apply: s => s.buildingHpMul *= 1.25
+    },
+
+    {
+        name: "🏰 核心强化",
+        desc: "Core 最大生命 +15%，并恢复 15%生命",
+        apply: s => {
+            s.coreMaxHpMul *= 1.15;
+            s.coreHp += s.baseCoreMaxHp * 0.15;
+            s.coreHp = Math.min(s.coreHp, getCoreMaxHp());
+        }
+    },
+
+    {
+        name: "💰 淘金热",
+        desc: "所有敌人金币掉落 +15%",
+        apply: s => s.goldDropMul *= 1.15
+    },
+
+    {
+        name: "📈 利滚利",
+        desc: "利息比例 +5%",
+        apply: s => s.interestRate += 0.05
+    },
+
+    {
+        name: "🏦 高效经营",
+        desc: "经济大楼收入 +25%",
+        apply: s => s.economyIncomeMul *= 1.25
+    },
+
+    {
+        name: "🔧 快速施工",
+        desc: "建筑建造费用 -10%",
+        apply: s => s.buildCostMul *= 0.9
+    },
+
+    {
+        name: "🔨 熟练工",
+        desc: "建筑升级费用 -10%",
+        apply: s => s.upgradeCostMul *= 0.9
+    },
+
+    {
+        name: "🛠️ 紧急维修",
+        desc: "每波结束恢复所有建筑 10% HP",
+        apply: s => s.waveRepair += 0.10
+    },
+
+    {
+        name: "💥 重型弹药",
+        desc: "伤害 +25%，攻速 -10%",
+        apply: s => {
+            s.damageMul *= 1.25;
+            s.attackSpeedMul *= 0.9;
+        }
+    },
+
+    {
+        name: "🧊 强力寒霜",
+        desc: "冰塔减速效果 +30%",
+        apply: s => s.slowMul *= 1.3
+    },
+
+    {
+        name: "💣 爆炸弹头",
+        desc: "攻击有20%概率造成范围伤害",
+        apply: s => s.explosionChance += 0.2
+    },
+
+    {
+        name: "⚡ 连锁电流",
+        desc: "攻击有15%概率攻击附近第二个敌人",
+        apply: s => s.chainChance += 0.15
+    },
+
+    {
+        name: "🎯 精准打击",
+        desc: "伤害 +10%，攻击范围 +0.5",
+        apply: s => {
+            s.damageMul *= 1.10;
+            s.rangeBonus += 0.5;
+        }
+    },
+
+    {
+        name: "🪙 战斗奖金",
+        desc: "每波结束额外获得 +50 Gold",
+        apply: s => s.waveBonusGold += 50
+    },
+
+    {
+        name: "💎 精英猎手",
+        desc: "对精英伤害 +35%",
+        apply: s => s.eliteDamageMul *= 1.35
+    },
+
+    {
+        name: "☠️ 巨物杀手",
+        desc: "对 Boss 伤害 +40%",
+        apply: s => s.bossDamageMul *= 1.4
+    },
+
+    {
+        name: "🧱 厚重墙体",
+        desc: "墙受到的伤害 -25%",
+        apply: s => s.wallDamageTakenMul *= 0.75
+    },
+
+    {
+        name: "🚧 拆迁专家",
+        desc: "建筑被摧毁时返还50%建造费用",
+        apply: s => s.destroyRefund = 0.5
+    },
+
+    {
+        name: "❤️ 背水一战",
+        desc: "Core低于30% HP时，所有攻击建筑伤害 +35%",
+        apply: s => s.lastStand = true
+    }
+];
+
+
+/* =========================
+   Game State
+========================= */
+
+let state = {
     gold: STARTING_GOLD,
 
     wave: 1,
+    phase: "prepare",
+
+    coreHp: CORE_MAX_HP,
+    baseCoreMaxHp: CORE_MAX_HP,
+    coreMaxHpMul: 1,
+
+    buildings: [],
+    enemies: [],
 
     selectedBuilding: null,
 
-    buildings: [],
+    nextBuildingId: 1,
+    nextEnemyId: 1,
 
-    enemies: [],
+    spawnTimer: 0,
+    waveKills: 0,
+    waveTotal: 0,
 
-    gameRunning: true,
+    interestRate: 0.10,
 
-    phase: "prepare",
+    damageMul: 1,
+    attackSpeedMul: 1,
+    buildingHpMul: 1,
 
-    enemiesToSpawn: 0,
+    goldDropMul: 1,
+    economyIncomeMul: 1,
 
-    enemiesSpawned: 0,
+    buildCostMul: 1,
+    upgradeCostMul: 1,
 
-    lastEnemySpawn: 0,
+    slowMul: 1,
+    explosionChance: 0,
+    chainChance: 0,
+    rangeBonus: 0,
 
-    spawnInterval: 900,
+    waveRepair: 0,
+    waveBonusGold: 0,
 
-    coreHp: 1000,
+    eliteDamageMul: 1,
+    bossDamageMul: 1,
 
-    coreMaxHp: 1000,
+    wallDamageTakenMul: 1,
 
-    nextWaveReady: true
+    destroyRefund: 0,
+    lastStand: false,
+
+    gameOver: false,
+    victory: false,
+
+    lastTime: performance.now()
 };
 
+
 const board = document.getElementById("game-board");
-const goldDisplay = document.getElementById("gold");
-const waveDisplay = document.getElementById("wave");
-const statusDisplay = document.getElementById("status");
-
-let startWaveButton = null;
-
-injectExtraStyles();
-createBoard();
-createControls();
-setupBuildButtons();
-updateUI();
-render();
-showPrepareState();
-
-let lastTime = performance.now();
-
-requestAnimationFrame(gameLoop);
+const statusEl = document.getElementById("status");
+const goldEl = document.getElementById("gold");
+const waveEl = document.getElementById("wave");
 
 
-/* =========================================================
-   INITIALIZATION
-========================================================= */
+/* =========================
+   Extra CSS
+========================= */
 
-function injectExtraStyles() {
+function injectStyles() {
+
     const style = document.createElement("style");
 
     style.textContent = `
+
         #game-board {
             position: relative;
-            overflow: hidden;
+        }
+
+        .cell {
+            cursor: pointer;
         }
 
         .core-full {
             grid-column: 1 / 11;
-            grid-row: 13 / 14;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(
-                to bottom,
-                #fbbf24,
-                #d97706
-            );
-            border: 3px solid #f59e0b;
-            border-radius: 6px;
+            grid-row: 13;
+
+            background: #f59e0b;
+            border: 2px solid #fbbf24;
+
             display: flex;
             align-items: center;
             justify-content: center;
+
             font-weight: bold;
-            font-size: clamp(14px, 4vw, 24px);
-            color: white;
-            text-shadow: 0 2px 3px rgba(0,0,0,.5);
-            z-index: 10;
-            pointer-events: none;
-        }
 
-        .core-hp {
-            position: absolute;
-            left: 10%;
-            right: 10%;
-            bottom: 6px;
-            height: 7px;
-            background: rgba(0,0,0,.35);
-            border-radius: 5px;
-            overflow: hidden;
-        }
-
-        .core-hp-inner {
-            height: 100%;
-            background: #22c55e;
-            transition: width .15s;
-        }
-
-        .building-wrapper {
-            width: 90%;
-            height: 90%;
             position: relative;
+            z-index: 3;
         }
 
         .building {
-            width: 100%;
-            height: 100%;
+            position: relative;
+            width: 90%;
+            height: 90%;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            cursor: pointer;
+        }
+
+        .building.selected-building {
+            outline: 3px solid white;
         }
 
         .building-hp {
             position: absolute;
+
             left: 5%;
             right: 5%;
-            bottom: 3px;
+            bottom: 3%;
+
             height: 5px;
-            background: rgba(0,0,0,.45);
+
+            background: #111827;
             border-radius: 4px;
+
             overflow: hidden;
         }
 
-        .building-hp-inner {
+        .building-hp > div {
             height: 100%;
             background: #22c55e;
         }
 
-        .enemy-container {
-            width: 82%;
-            height: 82%;
-            position: relative;
-            z-index: 20;
+        .enemy {
+            position: absolute;
+
+            width: 7%;
+            aspect-ratio: 1;
+
+            border-radius: 50%;
+
+            background: #ef4444;
+
+            z-index: 8;
+
+            pointer-events: none;
         }
 
-        .enemy {
-            width: 100%;
-            height: 100%;
-            position: relative;
-            background: #ef4444;
+        .enemy.elite {
+            background: #a855f7;
         }
 
         .enemy.boss {
-            width: 120%;
-            height: 120%;
-            margin-left: -10%;
-            margin-top: -10%;
-            background: #a855f7;
-            border: 3px solid #f0abfc;
+            background: #7f1d1d;
+
+            box-shadow:
+                0 0 0 3px #fbbf24;
         }
 
         .enemy-hp {
             position: absolute;
+
             left: -20%;
             right: -20%;
-            top: -8px;
+            top: -9px;
+
             height: 4px;
-            background: rgba(0,0,0,.7);
+
+            background: #111827;
+
             border-radius: 4px;
-            overflow: hidden;
         }
 
-        .enemy-hp-inner {
+        .enemy-hp > div {
             height: 100%;
             background: #22c55e;
         }
 
         .damage-number {
             position: absolute;
-            color: #fff;
+
+            z-index: 30;
+
+            color: white;
+
             font-weight: bold;
-            font-size: 13px;
-            text-shadow: 0 1px 3px #000;
-            animation: damageFloat .55s ease-out forwards;
+            font-size: 12px;
+
             pointer-events: none;
-            z-index: 50;
+
+            animation: damageFloat .55s ease-out forwards;
         }
 
         @keyframes damageFloat {
+
             from {
                 opacity: 1;
                 transform: translateY(0);
@@ -235,49 +417,129 @@ function injectExtraStyles() {
 
             to {
                 opacity: 0;
-                transform: translateY(-22px);
+                transform: translateY(-18px);
             }
         }
 
-        .attack-flash {
-            position: absolute;
-            inset: 0;
-            border: 3px solid #fff;
-            border-radius: 50%;
-            opacity: 0;
-            pointer-events: none;
-            animation: attackFlash .18s ease-out;
-            z-index: 30;
+        .game-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+
+            gap: 8px;
+
+            padding: 8px;
+
+            background: #1f2937;
         }
 
-        @keyframes attackFlash {
-            0% { opacity: .9; transform: scale(.5); }
-            100% { opacity: 0; transform: scale(1.4); }
-        }
+        .game-controls button {
+            min-height: 44px;
 
-        .wave-start {
-            margin-top: 7px;
-            padding: 9px 18px;
             border: none;
             border-radius: 8px;
-            background: #f59e0b;
+
+            background: #4b5563;
             color: white;
+
             font-weight: bold;
-            cursor: pointer;
         }
 
-        .wave-start:hover {
-            background: #d97706;
+        .game-controls button.primary {
+            background: #16a34a;
         }
 
-        .wave-start:disabled {
-            opacity: .5;
-            cursor: default;
+        .game-controls button:disabled {
+            opacity: .45;
         }
 
-        .prepare-text {
+        .building-info {
+            padding: 8px;
+
+            background: #111827;
+
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .buff-overlay {
+            position: absolute;
+
+            inset: 0;
+
+            z-index: 50;
+
+            background: rgba(15,23,42,.96);
+
+            display: flex;
+
+            flex-direction: column;
+
+            justify-content: center;
+
+            padding: 16px;
+        }
+
+        .buff-title {
+            font-size: 20px;
+
+            font-weight: bold;
+
+            text-align: center;
+
+            margin-bottom: 12px;
+        }
+
+        .buff-card {
+            width: 100%;
+
+            margin: 5px 0;
+
+            padding: 14px;
+
+            border: 1px solid #4b5563;
+            border-radius: 10px;
+
+            background: #1f2937;
+            color: white;
+
+            text-align: left;
+        }
+
+        .buff-card strong {
             display: block;
-            margin-bottom: 4px;
+
+            font-size: 16px;
+
+            margin-bottom: 5px;
+        }
+
+        .buff-card span {
+            color: #d1d5db;
+
+            font-size: 12px;
+        }
+
+        .core-hp {
+            position: absolute;
+
+            left: 4%;
+            right: 4%;
+
+            bottom: 5px;
+
+            height: 6px;
+
+            background: #78350f;
+
+            border-radius: 5px;
+
+            overflow: hidden;
+        }
+
+        .core-hp > div {
+            height: 100%;
+
+            background: #22c55e;
         }
     `;
 
@@ -285,19 +547,21 @@ function injectExtraStyles() {
 }
 
 
-/* =========================================================
-   BOARD
-========================================================= */
+/* =========================
+   Board
+========================= */
 
 function createBoard() {
+
     board.innerHTML = "";
 
-    for (let row = 0; row < ROWS; row++) {
+    for (let row = 0; row < CORE_ROW; row++) {
+
         for (let col = 0; col < COLS; col++) {
 
             const cell = document.createElement("div");
 
-            cell.classList.add("cell");
+            cell.className = "cell";
 
             cell.dataset.row = row;
             cell.dataset.col = col;
@@ -309,403 +573,16 @@ function createBoard() {
             board.appendChild(cell);
         }
     }
-}
 
-function getCell(row, col) {
-    return document.querySelector(
-        `.cell[data-row="${row}"][data-col="${col}"]`
-    );
-}
 
+    const core = document.createElement("div");
 
-/* =========================================================
-   UI
-========================================================= */
-
-function createControls() {
-
-    startWaveButton = document.createElement("button");
-
-    startWaveButton.className = "wave-start";
-
-    startWaveButton.textContent = "开始第 1 波";
-
-    startWaveButton.addEventListener("click", startWave);
-
-    statusDisplay.innerHTML = "";
-
-    const text = document.createElement("span");
-
-    text.className = "prepare-text";
-
-    statusDisplay.appendChild(text);
-
-    statusDisplay.appendChild(startWaveButton);
-}
-
-function setStatus(message) {
-
-    const text = statusDisplay.querySelector(".prepare-text");
-
-    if (text) {
-        text.textContent = message;
-    }
-}
-
-function updateUI() {
-
-    goldDisplay.textContent = Math.floor(gameState.gold);
-
-    waveDisplay.textContent = gameState.wave;
-
-    if (startWaveButton) {
-
-        if (gameState.phase === "prepare" &&
-            gameState.gameRunning) {
-
-            startWaveButton.style.display = "inline-block";
-
-            startWaveButton.disabled = false;
-
-            startWaveButton.textContent =
-                `开始第 ${gameState.wave} 波`;
-
-        } else {
-
-            startWaveButton.style.display = "none";
-        }
-    }
-}
-
-
-/* =========================================================
-   BUILDING SELECTION
-========================================================= */
-
-function setupBuildButtons() {
-
-    document
-        .querySelectorAll(".build-menu button")
-        .forEach(button => {
-
-            button.addEventListener("click", () => {
-
-                selectBuilding(
-                    button.dataset.building
-                );
-
-            });
-
-        });
-}
-
-function selectBuilding(type) {
-
-    if (!gameState.gameRunning) {
-        return;
-    }
-
-    gameState.selectedBuilding = type;
-
-    document
-        .querySelectorAll(".build-menu button")
-        .forEach(button => {
-            button.classList.remove("selected");
-        });
-
-    const button =
-        document.querySelector(
-            `[data-building="${type}"]`
-        );
-
-    if (button) {
-        button.classList.add("selected");
-    }
-
-    setStatus(
-        `${BUILDINGS[type].name}：点击地图放置`
-    );
-}
-
-
-/* =========================================================
-   BUILDING PLACEMENT
-========================================================= */
-
-function handleCellClick(row, col) {
-
-    if (!gameState.gameRunning) {
-        return;
-    }
-
-    /*
-        Core occupies the entire bottom row.
-        No building is allowed here.
-    */
-
-    if (row === CORE_ROW) {
-
-        setStatus(
-            "这里是 Core，不能建造。"
-        );
-
-        return;
-    }
-
-    if (!gameState.selectedBuilding) {
-
-        setStatus(
-            "请先选择一个建筑。"
-        );
-
-        return;
-    }
-
-    placeBuilding(
-        gameState.selectedBuilding,
-        row,
-        col
-    );
-}
-
-function isOccupied(row, col) {
-
-    return gameState.buildings.some(
-        building =>
-            building.row === row &&
-            building.col === col
-    );
-}
-
-function placeBuilding(type, row, col) {
-
-    const data = BUILDINGS[type];
-
-    if (isOccupied(row, col)) {
-
-        setStatus(
-            "这里已经有建筑了。"
-        );
-
-        return;
-    }
-
-    if (gameState.gold < data.cost) {
-
-        setStatus(
-            "金币不足。"
-        );
-
-        return;
-    }
-
-    gameState.gold -= data.cost;
-
-    const building = {
-
-        id:
-            Date.now() +
-            Math.random(),
-
-        type,
-
-        row,
-
-        col,
-
-        hp: data.maxHp,
-
-        maxHp: data.maxHp,
-
-        lastAttack: 0
-    };
-
-    gameState.buildings.push(building);
-
-    updateUI();
-
-    render();
-
-    setStatus(
-        `${data.name} 已建造。`
-    );
-}
-
-
-/* =========================================================
-   RENDER
-========================================================= */
-
-function render() {
-
-    document
-        .querySelectorAll(".cell")
-        .forEach(cell => {
-
-            cell.innerHTML = "";
-
-        });
-
-
-    /*
-        Buildings
-    */
-
-    gameState.buildings.forEach(building => {
-
-        const cell =
-            getCell(
-                building.row,
-                building.col
-            );
-
-        if (!cell) {
-            return;
-        }
-
-        const wrapper =
-            document.createElement("div");
-
-        wrapper.className =
-            "building-wrapper";
-
-        const element =
-            document.createElement("div");
-
-        element.className =
-            `building ${building.type}`;
-
-        element.textContent =
-            BUILDINGS[building.type].symbol;
-
-        wrapper.appendChild(element);
-
-
-        /*
-            Building HP bar
-        */
-
-        const hp =
-            document.createElement("div");
-
-        hp.className =
-            "building-hp";
-
-        const hpInner =
-            document.createElement("div");
-
-        hpInner.className =
-            "building-hp-inner";
-
-        hpInner.style.width =
-            `${Math.max(
-                0,
-                building.hp /
-                building.maxHp *
-                100
-            )}%`;
-
-        hp.appendChild(hpInner);
-
-        wrapper.appendChild(hp);
-
-        cell.appendChild(wrapper);
-    });
-
-
-    /*
-        Enemies
-    */
-
-    gameState.enemies.forEach(enemy => {
-
-        const row =
-            Math.floor(enemy.row);
-
-        const col =
-            Math.floor(enemy.col);
-
-        const cell =
-            getCell(row, col);
-
-        if (!cell) {
-            return;
-        }
-
-        const container =
-            document.createElement("div");
-
-        container.className =
-            "enemy-container";
-
-        const element =
-            document.createElement("div");
-
-        element.className =
-            enemy.boss
-                ? "enemy boss"
-                : "enemy";
-
-        const hp =
-            document.createElement("div");
-
-        hp.className =
-            "enemy-hp";
-
-        const hpInner =
-            document.createElement("div");
-
-        hpInner.className =
-            "enemy-hp-inner";
-
-        hpInner.style.width =
-            `${Math.max(
-                0,
-                enemy.hp /
-                enemy.maxHp *
-                100
-            )}%`;
-
-        hp.appendChild(hpInner);
-
-        element.appendChild(hp);
-
-        container.appendChild(element);
-
-        cell.appendChild(container);
-    });
-
-
-    /*
-        Core is ONE 1×10 entity.
-        It is rendered as one element across
-        the entire bottom row.
-    */
-
-    const oldCore =
-        board.querySelector(".core-full");
-
-    if (oldCore) {
-        oldCore.remove();
-    }
-
-    const core =
-        document.createElement("div");
-
-    core.className =
-        "core-full";
+    core.className = "core-full";
 
     core.innerHTML = `
         CORE
         <div class="core-hp">
-            <div class="core-hp-inner"
-                 style="width:${Math.max(
-                     0,
-                     gameState.coreHp /
-                     gameState.coreMaxHp *
-                     100
-                 )}%">
-            </div>
+            <div id="core-hp-bar"></div>
         </div>
     `;
 
@@ -713,406 +590,748 @@ function render() {
 }
 
 
-/* =========================================================
-   WAVE SYSTEM
-========================================================= */
+function getCell(row, col) {
 
-function showPrepareState() {
+    return board.querySelector(
+        `.cell[data-row="${row}"][data-col="${col}"]`
+    );
+}
 
-    gameState.phase = "prepare";
 
-    gameState.nextWaveReady = true;
+/* =========================
+   Controls
+========================= */
+
+function setupControls() {
+
+    let controls = document.querySelector(".game-controls");
+
+    if (!controls) {
+
+        controls = document.createElement("div");
+
+        controls.className = "game-controls";
+
+        document
+            .querySelector(".build-menu")
+            .after(controls);
+    }
+
+    controls.innerHTML = `
+        <button id="start-wave-btn" class="primary">
+            开始第 1 波
+        </button>
+
+        <button id="restart-btn">
+            重新开始
+        </button>
+    `;
+
+
+    document
+        .getElementById("start-wave-btn")
+        .addEventListener("click", startWave);
+
+
+    document
+        .getElementById("restart-btn")
+        .addEventListener("click", resetGame);
+}
+
+
+/* =========================
+   Building Buttons
+========================= */
+
+function setupBuildButtons() {
+
+    const menu = document.querySelector(".build-menu");
+
+
+    if (!menu.querySelector('[data-building="economy"]')) {
+
+        const button = document.createElement("button");
+
+        button.dataset.building = "economy";
+
+        button.innerHTML = `
+            🏦 Economy
+            <span>150G</span>
+        `;
+
+        menu.appendChild(button);
+    }
+
+
+    menu
+        .querySelectorAll("button[data-building]")
+        .forEach(button => {
+
+            button.addEventListener("click", () => {
+
+                selectBuilding(
+                    button.dataset.building
+                );
+            });
+        });
+}
+
+
+/* =========================
+   Building Placement
+========================= */
+
+function selectBuilding(type) {
+
+    if (state.phase !== "prepare") {
+
+        setStatus(
+            "只有波次开始前才能建造建筑。"
+        );
+
+        return;
+    }
+
+
+    state.selectedBuilding = type;
+
+
+    document
+        .querySelectorAll(".build-menu button")
+        .forEach(button => {
+
+            button.classList.toggle(
+                "selected",
+                button.dataset.building === type
+            );
+        });
+
 
     setStatus(
-        `准备阶段：先建造基地，然后开始第 ${gameState.wave} 波。`
+        `已选择 ${BUILDINGS[type].name}，点击地图放置。`
+    );
+}
+
+
+function handleCellClick(row, col) {
+
+    const existing = state.buildings.find(
+        building =>
+            building.row === row &&
+            building.col === col
     );
 
-    updateUI();
+
+    if (existing) {
+
+        showBuildingInfo(existing);
+
+        return;
+    }
+
+
+    if (state.phase !== "prepare") {
+
+        setStatus(
+            "波次进行中不能新建建筑。"
+        );
+
+        return;
+    }
+
+
+    if (!state.selectedBuilding) {
+
+        setStatus(
+            "请先选择建筑。"
+        );
+
+        return;
+    }
+
+
+    placeBuilding(
+        row,
+        col,
+        state.selectedBuilding
+    );
 }
+
+
+function getBuildCost(type) {
+
+    return Math.max(
+        1,
+        Math.round(
+            BUILDINGS[type].cost *
+            state.buildCostMul
+        )
+    );
+}
+
+
+function getUpgradeCost(building) {
+
+    return Math.max(
+        1,
+        Math.round(
+            BUILDINGS[building.type].cost *
+            (0.8 + building.level * 0.6) *
+            state.upgradeCostMul
+        )
+    );
+}
+
+
+function placeBuilding(row, col, type) {
+
+    if (
+        row < 0 ||
+        row >= CORE_ROW ||
+        col < 0 ||
+        col >= COLS
+    ) {
+
+        setStatus(
+            "Core区域不能建造。"
+        );
+
+        return;
+    }
+
+
+    if (
+        state.buildings.some(
+            b =>
+                b.row === row &&
+                b.col === col
+        )
+    ) {
+
+        setStatus(
+            "这里已经有建筑。"
+        );
+
+        return;
+    }
+
+
+    const cost = getBuildCost(type);
+
+
+    if (state.gold < cost) {
+
+        setStatus(
+            `金币不足，需要 ${cost} Gold。`
+        );
+
+        return;
+    }
+
+
+    const def = BUILDINGS[type];
+
+    const hp =
+        Math.round(
+            def.maxHp *
+            state.buildingHpMul
+        );
+
+
+    state.gold -= cost;
+
+
+    state.buildings.push({
+
+        id: state.nextBuildingId++,
+
+        type,
+
+        row,
+        col,
+
+        level: 1,
+
+        hp,
+        maxHp: hp,
+
+        cooldown: 0
+    });
+
+
+    state.selectedBuilding = null;
+
+
+    document
+        .querySelectorAll(".build-menu button")
+        .forEach(button =>
+            button.classList.remove("selected")
+        );
+
+
+    setStatus(
+        `${def.name} 建造完成。`
+    );
+
+
+    render();
+}
+
+
+/* =========================
+   Upgrade
+========================= */
+
+function getBuildingDamage(building) {
+
+    const def = BUILDINGS[building.type];
+
+    if (def.type !== "attack") {
+        return 0;
+    }
+
+
+    let damage =
+        def.damage *
+        (1 + 0.35 * (building.level - 1)) *
+        state.damageMul;
+
+
+    if (
+        state.lastStand &&
+        state.coreHp / getCoreMaxHp() < 0.3
+    ) {
+
+        damage *= 1.35;
+    }
+
+
+    return Math.round(damage);
+}
+
+
+function showBuildingInfo(building) {
+
+    const def = BUILDINGS[building.type];
+
+    const upgradeCost =
+        getUpgradeCost(building);
+
+
+    const canUpgrade =
+        state.phase === "prepare" &&
+        state.gold >= upgradeCost;
+
+
+    statusEl.innerHTML = `
+
+        <div class="building-info">
+
+            <strong>
+                ${def.symbol}
+                ${def.name}
+                Lv.${building.level}
+            </strong>
+
+            <br>
+
+            HP:
+            ${Math.ceil(building.hp)}
+            /
+            ${Math.ceil(building.maxHp)}
+
+            ${
+                def.type === "attack"
+                    ? `<br>伤害：${getBuildingDamage(building)}`
+                    : ""
+            }
+
+            ${
+                def.type === "economy"
+                    ? `
+                        <br>
+                        每回合：
+                        ${Math.round(
+                            def.income *
+                            state.economyIncomeMul
+                        )} Gold
+                    `
+                    : ""
+            }
+
+            ${
+                def.type === "attack"
+                    ? `
+                        <br>
+                        <button
+                            id="upgrade-selected"
+                            ${canUpgrade ? "" : "disabled"}
+                        >
+                            升级：${upgradeCost}G
+                        </button>
+                    `
+                    : ""
+            }
+
+        </div>
+    `;
+
+
+    const button =
+        document.getElementById(
+            "upgrade-selected"
+        );
+
+
+    if (button) {
+
+        button.addEventListener(
+            "click",
+            () => upgradeBuilding(building)
+        );
+    }
+}
+
+
+function upgradeBuilding(building) {
+
+    if (state.phase !== "prepare") {
+
+        setStatus(
+            "只能在波次开始前升级建筑。"
+        );
+
+        return;
+    }
+
+
+    const cost =
+        getUpgradeCost(building);
+
+
+    if (state.gold < cost) {
+
+        setStatus(
+            `金币不足，需要 ${cost}G。`
+        );
+
+        return;
+    }
+
+
+    state.gold -= cost;
+
+    building.level++;
+
+
+    const oldMax =
+        building.maxHp;
+
+
+    building.maxHp =
+        Math.round(
+            BUILDINGS[building.type].maxHp *
+            state.buildingHpMul *
+            (1 + 0.25 * (building.level - 1))
+        );
+
+
+    building.hp +=
+        building.maxHp - oldMax;
+
+
+    setStatus(
+        `${BUILDINGS[building.type].name} 升到 Lv.${building.level}。`
+    );
+
+
+    render();
+
+    showBuildingInfo(building);
+}
+
+
+/* =========================
+   Wave
+========================= */
 
 function startWave() {
 
-    if (!gameState.gameRunning) {
+    if (
+        state.gameOver ||
+        state.victory
+    ) {
         return;
     }
 
-    if (gameState.phase !== "prepare") {
+
+    if (state.phase !== "prepare") {
+
+        setStatus(
+            "现在不能开始下一波。"
+        );
+
         return;
     }
 
-    const data =
-        WAVE_DATA[
-            gameState.wave - 1
-        ];
 
-    gameState.phase = "combat";
+    const config =
+        WAVE_CONFIG[state.wave - 1];
 
-    gameState.enemiesToSpawn =
-        data.enemies;
 
-    gameState.enemiesSpawned = 0;
+    state.phase = "wave";
 
-    gameState.lastEnemySpawn = 0;
+    state.spawnTimer = 0;
 
-    gameState.nextWaveReady = false;
+    state.waveKills = 0;
 
-    if (startWaveButton) {
-        startWaveButton.style.display =
-            "none";
-    }
+    state.waveTotal =
+        config.enemies +
+        config.elites +
+        (config.boss ? 1 : 0);
+
 
     setStatus(
-        `第 ${gameState.wave} 波开始！`
+        `第 ${state.wave} 波开始！`
     );
-
-    updateUI();
 }
 
 
-/* =========================================================
-   SPAWN ENEMIES
-========================================================= */
+function spawnEnemy(type = "normal") {
 
-function spawnEnemy() {
+    const config =
+        WAVE_CONFIG[state.wave - 1];
 
-    const data =
-        WAVE_DATA[
-            gameState.wave - 1
-        ];
 
-    const col =
-        Math.floor(
-            Math.random() * COLS
-        );
+    let hp = config.hp;
 
-    const enemy = {
+    let speed = 0.7;
 
-        id:
-            Date.now() +
-            Math.random(),
+    let damage = 12;
 
-        row: 0,
+    let gold =
+        10 +
+        Math.floor(Math.random() * 6);
 
-        col,
 
-        hp: data.hp,
+    if (type === "elite") {
 
-        maxHp: data.hp,
+        hp *= 3;
 
-        speed: data.speed,
+        speed *= 0.85;
 
-        boss: Boolean(data.boss),
+        damage *= 1.8;
 
-        targetBuildingId: null,
+        gold =
+            30 +
+            Math.floor(Math.random() * 21);
+    }
+
+
+    if (type === "boss") {
+
+        hp = 900;
+
+        speed = 0.45;
+
+        damage = 35;
+
+        gold = 250;
+    }
+
+
+    state.enemies.push({
+
+        id: state.nextEnemyId++,
+
+        type,
+
+        x: COLS / 2,
+
+        y: -0.6,
+
+        hp,
+
+        maxHp: hp,
+
+        speed,
+
+        damage,
+
+        gold,
+
+        targetId: null,
 
         path: [],
 
         pathIndex: 0,
 
-        lastPathCalculation: 0,
+        attackCooldown: 0,
 
-        lastAttack: 0,
+        slowUntil: 0,
 
-        slowUntil: 0
-    };
-
-    gameState.enemies.push(enemy);
-
-    gameState.enemiesSpawned++;
+        slowAmount: 1
+    });
 }
 
 
-/* =========================================================
-   ENEMY AI
-========================================================= */
+function chooseSpawnType() {
 
-/*
-    IMPORTANT RULE:
+    const config =
+        WAVE_CONFIG[state.wave - 1];
 
-    Enemy does NOT use raw distance.
-
-    It searches for the nearest BUILDING
-    that it can actually reach.
-
-    Buildings block movement.
-
-    If a building is behind a wall,
-    the enemy cannot simply walk through the wall.
-*/
-
-function chooseEnemyTarget(enemy, now) {
 
     if (
-        now -
-        enemy.lastPathCalculation <
-        250
-    ) {
-        return;
-    }
-
-    enemy.lastPathCalculation = now;
-
-    let bestTarget = null;
-
-    let bestPath = null;
-
-    let bestDistance = Infinity;
-
-
-    /*
-        Check every building.
-    */
-
-    for (
-        const building
-        of gameState.buildings
+        config.boss &&
+        !state.enemies.some(
+            enemy => enemy.type === "boss"
+        )
     ) {
 
-        if (building.hp <= 0) {
-            continue;
-        }
-
-        const goals =
-            getAdjacentCells(
-                building.row,
-                building.col
-            );
-
-        for (
-            const goal
-            of goals
-        ) {
-
-            const path =
-                findPath(
-                    enemy,
-                    goal.row,
-                    goal.col,
-                    false
-                );
-
-            if (!path) {
-                continue;
-            }
-
-            if (
-                path.length <
-                bestDistance
-            ) {
-
-                bestDistance =
-                    path.length;
-
-                bestTarget =
-                    building;
-
-                bestPath =
-                    path;
-            }
-        }
+        return "boss";
     }
 
 
-    /*
-        If a reachable building exists,
-        attack that building.
-    */
-
-    if (bestTarget) {
-
-        enemy.targetBuildingId =
-            bestTarget.id;
-
-        enemy.path =
-            bestPath || [];
-
-        enemy.pathIndex = 0;
-
-        return;
-    }
+    const eliteCount =
+        state.enemies.filter(
+            enemy => enemy.type === "elite"
+        ).length;
 
 
-    /*
-        No reachable building.
-
-        Try to reach the row immediately
-        above Core.
-    */
-
-    const coreGoals = [];
-
-    for (
-        let col = 0;
-        col < COLS;
-        col++
+    if (
+        eliteCount < config.elites &&
+        Math.random() < 0.18
     ) {
 
-        coreGoals.push({
-            row: CORE_ROW - 1,
-            col
-        });
+        return "elite";
     }
 
-    let corePath = null;
 
-    let coreDistance = Infinity;
-
-    for (
-        const goal
-        of coreGoals
-    ) {
-
-        const path =
-            findPath(
-                enemy,
-                goal.row,
-                goal.col,
-                false
-            );
-
-        if (
-            path &&
-            path.length <
-            coreDistance
-        ) {
-
-            coreDistance =
-                path.length;
-
-            corePath =
-                path;
-        }
-    }
-
-    enemy.targetBuildingId =
-        null;
-
-    enemy.path =
-        corePath || [];
-
-    enemy.pathIndex = 0;
+    return "normal";
 }
 
 
-/* =========================================================
-   PATHFINDING
-========================================================= */
+/* =========================
+   Enemy Pathfinding
+========================= */
 
-function findPath(
-    enemy,
-    targetRow,
-    targetCol,
-    allowTargetOccupied
-) {
+function isBuildingAt(row, col) {
 
-    const startRow =
-        Math.floor(enemy.row);
-
-    const startCol =
-        Math.floor(enemy.col);
+    return state.buildings.some(
+        building =>
+            building.row === row &&
+            building.col === col
+    );
+}
 
 
-    if (
-        startRow === targetRow &&
-        startCol === targetCol
-    ) {
-        return [];
-    }
+function getNeighbors(row, col) {
 
-
-    const queue = [
-        {
-            row: startRow,
-            col: startCol
-        }
+    const directions = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1]
     ];
 
-    const visited =
-        new Set();
 
-    const parent =
-        new Map();
+    return directions
+        .map(([dr, dc]) => [
+            row + dr,
+            col + dc
+        ])
+        .filter(
+            ([r, c]) =>
+                r >= 0 &&
+                r < CORE_ROW &&
+                c >= 0 &&
+                c < COLS
+        );
+}
 
-    const key =
-        (row, col) =>
-            `${row},${col}`;
 
-    visited.add(
-        key(startRow, startCol)
+function findPath(
+    startRow,
+    startCol,
+    targetRow,
+    targetCol
+) {
+
+    const queue = [
+        [startRow, startCol]
+    ];
+
+
+    const cameFrom = new Map();
+
+
+    const key = (r, c) =>
+        `${r},${c}`;
+
+
+    cameFrom.set(
+        key(startRow, startCol),
+        null
     );
 
 
-    while (queue.length > 0) {
+    while (queue.length) {
 
-        const current =
+        const [row, col] =
             queue.shift();
 
 
-        const directions = [
-            { row: -1, col: 0 },
-            { row: 1, col: 0 },
-            { row: 0, col: -1 },
-            { row: 0, col: 1 }
-        ];
+        if (
+            row === targetRow &&
+            col === targetCol
+        ) {
+
+            const path = [];
+
+            let current = [
+                row,
+                col
+            ];
+
+
+            while (current) {
+
+                path.unshift(current);
+
+                current =
+                    cameFrom.get(
+                        key(
+                            current[0],
+                            current[1]
+                        )
+                    );
+            }
+
+
+            return path;
+        }
 
 
         for (
-            const direction
-            of directions
+            const [nextRow, nextCol]
+            of getNeighbors(row, col)
         ) {
 
-            const nextRow =
-                current.row +
-                direction.row;
-
-            const nextCol =
-                current.col +
-                direction.col;
+            const k =
+                key(nextRow, nextCol);
 
 
-            if (
-                nextRow < 0 ||
-                nextRow >= CORE_ROW ||
-                nextCol < 0 ||
-                nextCol >= COLS
-            ) {
+            if (cameFrom.has(k)) {
                 continue;
             }
 
 
-            const nextKey =
-                key(
+            if (
+                isBuildingAt(
                     nextRow,
                     nextCol
-                );
-
-
-            if (
-                visited.has(nextKey)
-            ) {
-                continue;
-            }
-
-
-            /*
-                Buildings are obstacles.
-
-                Exception:
-                allowTargetOccupied is useful
-                if we ever need it later.
-            */
-
-            const occupied =
-                isOccupied(
-                    nextRow,
-                    nextCol
-                );
-
-
-            if (
-                occupied &&
+                ) &&
                 !(
-                    allowTargetOccupied &&
                     nextRow === targetRow &&
                     nextCol === targetCol
                 )
@@ -1122,36 +1341,16 @@ function findPath(
             }
 
 
-            visited.add(nextKey);
-
-            parent.set(
-                nextKey,
-                {
-                    row: current.row,
-                    col: current.col
-                }
+            cameFrom.set(
+                k,
+                [row, col]
             );
 
 
-            if (
-                nextRow === targetRow &&
-                nextCol === targetCol
-            ) {
-
-                return reconstructPath(
-                    parent,
-                    startRow,
-                    startCol,
-                    targetRow,
-                    targetCol
-                );
-            }
-
-
-            queue.push({
-                row: nextRow,
-                col: nextCol
-            });
+            queue.push([
+                nextRow,
+                nextCol
+            ]);
         }
     }
 
@@ -1159,106 +1358,868 @@ function findPath(
     return null;
 }
 
-function reconstructPath(
-    parent,
-    startRow,
-    startCol,
-    targetRow,
-    targetCol
-) {
 
-    const path = [];
+function chooseEnemyTarget(enemy) {
 
-    let current = {
-        row: targetRow,
-        col: targetCol
-    };
+    const startRow =
+        Math.max(
+            0,
+            Math.min(
+                CORE_ROW - 1,
+                Math.floor(enemy.y)
+            )
+        );
 
 
-    while (
-        current.row !== startRow ||
-        current.col !== startCol
+    const startCol =
+        Math.max(
+            0,
+            Math.min(
+                COLS - 1,
+                Math.floor(enemy.x)
+            )
+        );
+
+
+    let best = null;
+
+
+    /*
+        怪物不是全地图直接追最近建筑。
+
+        它会计算：
+        “我真正走过去需要多少格？”
+
+        这样墙才能真正影响路线。
+    */
+
+    for (
+        const building
+        of state.buildings
     ) {
 
-        path.unshift({
-            row: current.row,
-            col: current.col
-        });
+        for (
+            const [row, col]
+            of getNeighbors(
+                building.row,
+                building.col
+            )
+        ) {
 
-        const previous =
-            parent.get(
-                `${current.row},${current.col}`
-            );
+            const path =
+                findPath(
+                    startRow,
+                    startCol,
+                    row,
+                    col
+                );
 
-        if (!previous) {
-            return null;
+
+            if (!path) {
+                continue;
+            }
+
+
+            if (
+                !best ||
+                path.length < best.score
+            ) {
+
+                best = {
+                    building,
+                    path,
+                    score: path.length
+                };
+            }
         }
-
-        current = previous;
     }
 
 
-    return path;
+    if (best) {
+
+        enemy.targetId =
+            best.building.id;
+
+        enemy.path =
+            best.path;
+
+        enemy.pathIndex = 0;
+
+        return;
+    }
+
+
+    /*
+        如果没有可达建筑，
+        就继续前往 Core。
+    */
+
+    enemy.targetId = null;
+
+    const path =
+        findPath(
+            startRow,
+            startCol,
+            CORE_ROW - 1,
+            startCol
+        );
+
+
+    enemy.path =
+        path || [];
+
+    enemy.pathIndex = 0;
 }
 
 
-/* =========================================================
-   ADJACENT CELLS
-========================================================= */
+/* =========================
+   Enemy Update
+========================= */
 
-function getAdjacentCells(
-    row,
-    col
-) {
+function updateEnemies(dt, now) {
 
-    const result = [];
+    if (state.phase === "wave") {
 
-    const directions = [
-        { row: -1, col: 0 },
-        { row: 1, col: 0 },
-        { row: 0, col: -1 },
-        { row: 0, col: 1 }
-    ];
-
-
-    for (
-        const direction
-        of directions
-    ) {
-
-        const r =
-            row +
-            direction.row;
-
-        const c =
-            col +
-            direction.col;
+        const alive =
+            state.enemies.length;
 
 
         if (
-            r < 0 ||
-            r >= CORE_ROW ||
-            c < 0 ||
-            c >= COLS
+            state.waveKills + alive <
+            state.waveTotal
         ) {
+
+            state.spawnTimer -= dt;
+
+
+            if (state.spawnTimer <= 0) {
+
+                spawnEnemy(
+                    chooseSpawnType()
+                );
+
+
+                state.spawnTimer =
+                    Math.max(
+                        280,
+                        1500 -
+                        state.wave * 100
+                    );
+            }
+        }
+    }
+
+
+    for (
+        const enemy
+        of state.enemies
+    ) {
+
+        enemy.attackCooldown -= dt;
+
+
+        if (
+            enemy.slowUntil <= now
+        ) {
+
+            enemy.slowAmount = 1;
+        }
+
+
+        if (
+            !enemy.path.length ||
+            enemy.pathIndex >=
+            enemy.path.length
+        ) {
+
+            chooseEnemyTarget(enemy);
+        }
+
+
+        const target =
+            enemy.targetId
+                ? state.buildings.find(
+                    b =>
+                        b.id ===
+                        enemy.targetId
+                )
+                : null;
+
+
+        if (target) {
+
+            const distance =
+                Math.hypot(
+                    enemy.x -
+                    (target.col + 0.5),
+
+                    enemy.y -
+                    (target.row + 0.5)
+                );
+
+
+            if (distance <= 1.05) {
+
+                if (
+                    enemy.attackCooldown <= 0
+                ) {
+
+                    attackBuilding(
+                        enemy,
+                        target
+                    );
+                }
+
+
+                continue;
+            }
+        }
+
+
+        if (
+            !target &&
+            CORE_ROW -
+            enemy.y <= 1.15
+        ) {
+
+            if (
+                enemy.attackCooldown <= 0
+            ) {
+
+                attackCore(enemy);
+            }
+
+
             continue;
         }
 
 
+        moveEnemy(
+            enemy,
+            dt
+        );
+    }
+
+
+    state.enemies =
+        state.enemies.filter(
+            enemy =>
+                enemy.hp > 0
+        );
+}
+
+
+function moveEnemy(enemy, dt) {
+
+    if (!enemy.path.length) {
+
+        enemy.y +=
+            enemy.speed *
+            enemy.slowAmount *
+            dt /
+            1000;
+
+        return;
+    }
+
+
+    const index =
+        Math.min(
+            enemy.pathIndex + 1,
+            enemy.path.length - 1
+        );
+
+
+    const [
+        targetRow,
+        targetCol
+    ] = enemy.path[index];
+
+
+    const targetX =
+        targetCol + 0.5;
+
+    const targetY =
+        targetRow + 0.5;
+
+
+    const dx =
+        targetX - enemy.x;
+
+    const dy =
+        targetY - enemy.y;
+
+
+    const distance =
+        Math.hypot(dx, dy);
+
+
+    if (distance < 0.05) {
+
+        enemy.pathIndex = index;
+
+        return;
+    }
+
+
+    const movement =
+        enemy.speed *
+        enemy.slowAmount *
+        dt /
+        1000;
+
+
+    enemy.x +=
+        dx /
+        distance *
+        Math.min(
+            movement,
+            distance
+        );
+
+
+    enemy.y +=
+        dy /
+        distance *
+        Math.min(
+            movement,
+            distance
+        );
+}
+
+
+/* =========================
+   Enemy Attacks
+========================= */
+
+function attackBuilding(
+    enemy,
+    building
+) {
+
+    let damage =
+        enemy.damage;
+
+
+    if (
+        building.type === "wall"
+    ) {
+
+        damage *=
+            state.wallDamageTakenMul;
+    }
+
+
+    building.hp -= damage;
+
+    enemy.attackCooldown = 900;
+
+
+    showDamage(
+        building.col,
+        building.row,
+        Math.round(damage)
+    );
+
+
+    if (building.hp <= 0) {
+
+        if (
+            state.destroyRefund > 0
+        ) {
+
+            state.gold += Math.round(
+                getBuildCost(
+                    building.type
+                ) *
+                state.destroyRefund
+            );
+        }
+
+
+        state.buildings =
+            state.buildings.filter(
+                b =>
+                    b.id !==
+                    building.id
+            );
+
+
+        enemy.targetId = null;
+
+        enemy.path = [];
+    }
+}
+
+
+function attackCore(enemy) {
+
+    state.coreHp -=
+        enemy.damage;
+
+
+    enemy.attackCooldown = 900;
+
+
+    showCoreDamage(
+        Math.round(enemy.damage)
+    );
+
+
+    if (state.coreHp <= 0) {
+
+        state.coreHp = 0;
+
+        state.gameOver = true;
+
+        state.phase = "gameover";
+
+        setStatus(
+            "💀 Core 被摧毁，防守失败。"
+        );
+    }
+}
+
+
+/* =========================
+   Building Combat
+========================= */
+
+function getEnemyDamageMultiplier(enemy) {
+
+    let multiplier = 1;
+
+
+    if (
+        enemy.type === "elite"
+    ) {
+
+        multiplier *=
+            state.eliteDamageMul;
+    }
+
+
+    if (
+        enemy.type === "boss"
+    ) {
+
+        multiplier *=
+            state.bossDamageMul;
+    }
+
+
+    return multiplier;
+}
+
+
+function updateBuildings(
+    dt,
+    now
+) {
+
+    for (
+        const building
+        of state.buildings
+    ) {
+
+        if (
+            building.type !==
+            "turret" &&
+            building.type !==
+            "ice"
+        ) {
+
+            continue;
+        }
+
+
+        building.cooldown -= dt;
+
+
+        if (
+            building.cooldown > 0
+        ) {
+
+            continue;
+        }
+
+
+        const def =
+            BUILDINGS[
+                building.type
+            ];
+
+
+        const range =
+            def.range +
+            state.rangeBonus;
+
+
+        let target = null;
+
+        let bestDistance =
+            Infinity;
+
+
+        for (
+            const enemy
+            of state.enemies
+        ) {
+
+            const distance =
+                Math.hypot(
+
+                    enemy.x -
+                    (building.col + 0.5),
+
+                    enemy.y -
+                    (building.row + 0.5)
+
+                );
+
+
+            if (
+                distance <= range &&
+                distance <
+                bestDistance
+            ) {
+
+                bestDistance =
+                    distance;
+
+                target =
+                    enemy;
+            }
+        }
+
+
+        if (!target) {
+            continue;
+        }
+
+
+        let damage =
+            getBuildingDamage(
+                building
+            );
+
+
+        damage *=
+            getEnemyDamageMultiplier(
+                target
+            );
+
+
+        target.hp -= damage;
+
+
+        building.cooldown =
+            def.attackCooldown /
+            state.attackSpeedMul /
+            (
+                1 +
+                0.15 *
+                (building.level - 1)
+            );
+
+
+        showDamageAtEnemy(
+            target,
+            Math.round(damage)
+        );
+
+
         /*
-            Enemy needs an empty cell
-            next to the building.
+            冰塔减速
         */
 
         if (
-            !isOccupied(r, c)
+            building.type === "ice"
         ) {
 
-            result.push({
-                row: r,
-                col: c
-            });
+            target.slowAmount =
+                Math.max(
+                    0.25,
+                    1 -
+                    def.slow *
+                    state.slowMul
+                );
+
+
+            target.slowUntil =
+                now +
+                def.slowDuration;
         }
+
+
+        /*
+            爆炸
+        */
+
+        if (
+            state.explosionChance > 0 &&
+            Math.random() <
+            state.explosionChance
+        ) {
+
+            for (
+                const other
+                of state.enemies
+            ) {
+
+                if (
+                    other.id ===
+                    target.id
+                ) {
+                    continue;
+                }
+
+
+                const distance =
+                    Math.hypot(
+                        other.x -
+                        target.x,
+
+                        other.y -
+                        target.y
+                    );
+
+
+                if (
+                    distance <= 1.2
+                ) {
+
+                    const splash =
+                        damage *
+                        0.5;
+
+
+                    other.hp -=
+                        splash;
+
+
+                    showDamageAtEnemy(
+                        other,
+                        Math.round(
+                            splash
+                        )
+                    );
+                }
+            }
+        }
+
+
+        /*
+            连锁攻击
+        */
+
+        if (
+            state.chainChance > 0 &&
+            Math.random() <
+            state.chainChance
+        ) {
+
+            const nearby =
+                state.enemies
+                    .filter(
+                        e =>
+                            e.id !==
+                            target.id
+                    )
+                    .sort(
+                        (a, b) =>
+                            Math.hypot(
+                                a.x -
+                                target.x,
+
+                                a.y -
+                                target.y
+                            ) -
+                            Math.hypot(
+                                b.x -
+                                target.x,
+
+                                b.y -
+                                target.y
+                            )
+                    )[0];
+
+
+            if (
+                nearby &&
+                Math.hypot(
+                    nearby.x -
+                    target.x,
+
+                    nearby.y -
+                    target.y
+                ) <= 2
+            ) {
+
+                const chainDamage =
+                    damage *
+                    0.5;
+
+
+                nearby.hp -=
+                    chainDamage;
+
+
+                showDamageAtEnemy(
+                    nearby,
+                    Math.round(
+                        chainDamage
+                    )
+                );
+            }
+        }
+    }
+
+
+    /*
+        结算死亡
+    */
+
+    const dead =
+        state.enemies.filter(
+            enemy =>
+                enemy.hp <= 0
+        );
+
+
+    for (
+        const enemy
+        of dead
+    ) {
+
+        const reward =
+            Math.round(
+                enemy.gold *
+                state.goldDropMul
+            );
+
+
+        state.gold +=
+            reward;
+
+
+        state.waveKills++;
+    }
+}
+
+
+/* =========================
+   Wave Economy
+========================= */
+
+function applyWaveEndIncome() {
+
+    let economyIncome = 0;
+
+
+    for (
+        const building
+        of state.buildings
+    ) {
+
+        if (
+            building.type ===
+            "economy"
+        ) {
+
+            economyIncome +=
+                Math.round(
+                    BUILDINGS.economy.income *
+                    state.economyIncomeMul
+                );
+        }
+    }
+
+
+    const interest =
+        Math.round(
+            state.gold *
+            state.interestRate
+        );
+
+
+    state.gold +=
+        economyIncome;
+
+
+    state.gold +=
+        interest;
+
+
+    state.gold +=
+        state.waveBonusGold;
+
+
+    /*
+        修理
+    */
+
+    if (
+        state.waveRepair > 0
+    ) {
+
+        for (
+            const building
+            of state.buildings
+        ) {
+
+            building.hp =
+                Math.min(
+                    building.maxHp,
+
+                    building.hp +
+                    building.maxHp *
+                    state.waveRepair
+                );
+        }
+    }
+
+
+    setStatus(
+        `本波奖励：经济 +${economyIncome}G，`
+        +
+        `利息 +${interest}G`
+        +
+        `，额外 +${state.waveBonusGold}G`
+    );
+}
+
+
+/* =========================
+   Buff Choice
+========================= */
+
+function getRandomBuffs() {
+
+    const pool =
+        [...BUFFS];
+
+    const result = [];
+
+
+    while (
+        result.length < 3 &&
+        pool.length
+    ) {
+
+        const index =
+            Math.floor(
+                Math.random() *
+                pool.length
+            );
+
+
+        result.push(
+            pool.splice(
+                index,
+                1
+            )[0]
+        );
     }
 
 
@@ -1266,519 +2227,211 @@ function getAdjacentCells(
 }
 
 
-/* =========================================================
-   ENEMY MOVEMENT
-========================================================= */
+function showBuffChoice() {
 
-function updateEnemies(delta, now) {
-
-    gameState.enemies.forEach(enemy => {
-
-        if (enemy.hp <= 0) {
-            return;
-        }
+    state.phase = "buff";
 
 
-        /*
-            Recalculate target/path.
-        */
-
-        chooseEnemyTarget(
-            enemy,
-            now
-        );
+    const overlay =
+        document.createElement("div");
 
 
-        /*
-            Determine whether enemy
-            has reached its target.
-        */
+    overlay.className =
+        "buff-overlay";
 
-        if (
-            enemy.targetBuildingId
-        ) {
 
-            const target =
-                gameState.buildings.find(
-                    building =>
-                        building.id ===
-                        enemy.targetBuildingId
+    overlay.innerHTML = `
+        <div class="buff-title">
+            🎁 选择一个强化
+        </div>
+    `;
+
+
+    getRandomBuffs()
+        .forEach(buff => {
+
+            const button =
+                document.createElement(
+                    "button"
                 );
 
 
-            if (
-                !target ||
-                target.hp <= 0
-            ) {
+            button.className =
+                "buff-card";
 
-                enemy.targetBuildingId =
-                    null;
 
-                enemy.path = [];
+            button.innerHTML = `
+                <strong>
+                    ${buff.name}
+                </strong>
 
-                return;
-            }
+                <span>
+                    ${buff.desc}
+                </span>
+            `;
 
 
-            /*
-                If enemy is next to target,
-                stop moving and attack it.
-            */
+            button.addEventListener(
+                "click",
+                () => {
 
-            const distance =
-                Math.abs(
-                    Math.floor(enemy.row) -
-                    target.row
-                ) +
-                Math.abs(
-                    Math.floor(enemy.col) -
-                    target.col
-                );
+                    buff.apply(state);
 
 
-            if (distance <= 1) {
+                    overlay.remove();
 
-                enemy.path = [];
 
-                attackBuilding(
-                    enemy,
-                    target,
-                    now
-                );
+                    if (
+                        state.wave >=
+                        TOTAL_WAVES
+                    ) {
 
-                return;
-            }
-        }
+                        state.victory =
+                            true;
 
+                        state.phase =
+                            "victory";
 
-        /*
-            No building target:
-            if enemy reaches row above Core,
-            attack Core.
-        */
 
-        if (
-            !enemy.targetBuildingId &&
-            Math.floor(enemy.row) >=
-            CORE_ROW - 1
-        ) {
+                        setStatus(
+                            "🎉 你成功守住了 Core！"
+                        );
 
-            attackCore(
-                enemy,
-                now
-            );
 
-            return;
-        }
+                        render();
 
+                        return;
+                    }
 
-        moveEnemy(
-            enemy,
-            delta
-        );
-    });
-}
 
+                    state.wave++;
 
-function moveEnemy(
-    enemy,
-    delta
-) {
 
-    if (
-        !enemy.path ||
-        enemy.pathIndex >=
-        enemy.path.length
-    ) {
-        return;
-    }
+                    state.phase =
+                        "prepare";
 
 
-    const next =
-        enemy.path[
-            enemy.pathIndex
-        ];
+                    state.enemies = [];
 
 
-    const dx =
-        next.col -
-        enemy.col;
+                    setStatus(
+                        `第 ${state.wave} 波准备阶段`
+                    );
 
-    const dy =
-        next.row -
-        enemy.row;
 
-
-    const distance =
-        Math.sqrt(
-            dx * dx +
-            dy * dy
-        );
-
-
-    if (
-        distance < 0.05
-    ) {
-
-        enemy.col =
-            next.col;
-
-        enemy.row =
-            next.row;
-
-        enemy.pathIndex++;
-
-        return;
-    }
-
-
-    let speed =
-        enemy.speed;
-
-
-    if (
-        enemy.slowUntil >
-        performance.now()
-    ) {
-        speed *= 0.5;
-    }
-
-
-    const amount =
-        speed *
-        delta /
-        1000;
-
-
-    enemy.col +=
-        dx /
-        distance *
-        amount;
-
-    enemy.row +=
-        dy /
-        distance *
-        amount;
-}
-
-
-/* =========================================================
-   ENEMY ATTACKS BUILDINGS
-========================================================= */
-
-function attackBuilding(
-    enemy,
-    building,
-    now
-) {
-
-    if (
-        now -
-        enemy.lastAttack <
-        700
-    ) {
-        return;
-    }
-
-    enemy.lastAttack =
-        now;
-
-    building.hp -=
-        enemy.boss
-            ? 18
-            : 8;
-
-
-    showDamage(
-        building.row,
-        building.col,
-        enemy.boss
-            ? 18
-            : 8
-    );
-
-
-    if (
-        building.hp <= 0
-    ) {
-
-        building.hp = 0;
-
-        /*
-            Building destroyed.
-        */
-
-        setStatus(
-            `${BUILDINGS[building.type].name} 被摧毁了！`
-        );
-    }
-}
-
-
-/* =========================================================
-   CORE DAMAGE
-========================================================= */
-
-function attackCore(
-    enemy,
-    now
-) {
-
-    if (
-        now -
-        enemy.lastAttack <
-        700
-    ) {
-        return;
-    }
-
-    enemy.lastAttack =
-        now;
-
-    const damage =
-        enemy.boss
-            ? 35
-            : 10;
-
-    gameState.coreHp -=
-        damage;
-
-
-    showCoreDamage(
-        damage
-    );
-
-
-    if (
-        gameState.coreHp <= 0
-    ) {
-
-        gameState.coreHp = 0;
-
-        gameState.gameRunning =
-            false;
-
-        gameState.phase =
-            "gameover";
-
-        setStatus(
-            "💀 CORE 被摧毁！游戏失败。"
-        );
-
-        if (startWaveButton) {
-            startWaveButton.style.display =
-                "none";
-        }
-    }
-}
-
-
-/* =========================================================
-   BUILDING COMBAT
-========================================================= */
-
-function updateBuildings(now) {
-
-    gameState.buildings.forEach(
-        building => {
-
-            if (
-                building.hp <= 0
-            ) {
-                return;
-            }
-
-
-            const data =
-                BUILDINGS[
-                    building.type
-                ];
-
-
-            if (
-                data.type !== "attack"
-            ) {
-                return;
-            }
-
-
-            if (
-                now -
-                building.lastAttack <
-                data.attackCooldown
-            ) {
-                return;
-            }
-
-
-            const target =
-                findNearestEnemy(
-                    building
-                );
-
-
-            if (!target) {
-                return;
-            }
-
-
-            /*
-                MACHINE GUN / ICE TOWER
-                actually deal damage.
-            */
-
-            target.hp -=
-                data.damage;
-
-
-            building.lastAttack =
-                now;
-
-
-            /*
-                Ice slows enemy.
-            */
-
-            if (
-                building.type === "ice"
-            ) {
-
-                target.slowUntil =
-                    now + 1000;
-            }
-
-
-            showDamage(
-                Math.floor(target.row),
-                Math.floor(target.col),
-                data.damage
+                    render();
+                }
             );
 
 
-            showAttackFlash(
-                building
+            overlay.appendChild(
+                button
             );
+        });
 
 
-            if (
-                target.hp <= 0
-            ) {
-
-                target.hp = 0;
-
-                gameState.gold +=
-                    target.boss
-                        ? 40
-                        : 8;
-            }
-        }
+    board.appendChild(
+        overlay
     );
 }
 
 
-/* =========================================================
-   TURRET TARGETING
-========================================================= */
-
-function findNearestEnemy(
-    building
-) {
-
-    let nearest = null;
-
-    let nearestDistance =
-        Infinity;
-
-
-    gameState.enemies.forEach(
-        enemy => {
-
-            if (
-                enemy.hp <= 0
-            ) {
-                return;
-            }
-
-
-            const distance =
-                Math.sqrt(
-                    (
-                        enemy.row -
-                        building.row
-                    ) ** 2 +
-                    (
-                        enemy.col -
-                        building.col
-                    ) ** 2
-                );
-
-
-            if (
-                distance <=
-                BUILDINGS[
-                    building.type
-                ].range &&
-                distance <
-                nearestDistance
-            ) {
-
-                nearest =
-                    enemy;
-
-                nearestDistance =
-                    distance;
-            }
-        }
-    );
-
-
-    return nearest;
-}
-
-
-/* =========================================================
-   VISUAL DAMAGE
-========================================================= */
+/* =========================
+   Damage UI
+========================= */
 
 function showDamage(
-    row,
     col,
-    amount
+    row,
+    damage
 ) {
 
     const cell =
-        getCell(row, col);
+        getCell(
+            row,
+            col
+        );
+
 
     if (!cell) {
         return;
     }
 
-    const number =
-        document.createElement("div");
 
-    number.className =
+    const element =
+        document.createElement(
+            "div"
+        );
+
+
+    element.className =
         "damage-number";
 
-    number.textContent =
-        `-${amount}`;
 
-    number.style.left =
-        `${30 + Math.random() * 30}%`;
+    element.textContent =
+        `-${damage}`;
 
-    number.style.top =
-        "15%";
 
-    cell.appendChild(number);
+    element.style.left =
+        "40%";
 
-    setTimeout(() => {
+    element.style.top =
+        "20%";
 
-        number.remove();
 
-    }, 600);
+    cell.appendChild(
+        element
+    );
+
+
+    setTimeout(
+        () => element.remove(),
+        600
+    );
 }
 
+
+function showDamageAtEnemy(
+    enemy,
+    damage
+) {
+
+    const element =
+        document.createElement(
+            "div"
+        );
+
+
+    element.className =
+        "damage-number";
+
+
+    element.textContent =
+        `-${damage}`;
+
+
+    element.style.left =
+        `${enemy.x / COLS * 100}%`;
+
+
+    element.style.top =
+        `${enemy.y / ROWS * 100}%`;
+
+
+    board.appendChild(
+        element
+    );
+
+
+    setTimeout(
+        () => element.remove(),
+        600
+    );
+}
+
+
 function showCoreDamage(
-    amount
+    damage
 ) {
 
     const core =
@@ -1786,259 +2439,460 @@ function showCoreDamage(
             ".core-full"
         );
 
+
     if (!core) {
         return;
     }
 
-    const number =
-        document.createElement("div");
 
-    number.className =
+    const element =
+        document.createElement(
+            "div"
+        );
+
+
+    element.className =
         "damage-number";
 
-    number.textContent =
-        `-${amount}`;
 
-    number.style.left =
+    element.textContent =
+        `-${damage}`;
+
+
+    element.style.left =
         "50%";
 
-    number.style.top =
-        "10%";
 
-    core.appendChild(number);
+    element.style.top =
+        "30%";
 
-    setTimeout(() => {
 
-        number.remove();
+    core.appendChild(
+        element
+    );
 
-    }, 600);
-}
 
-function showAttackFlash(
-    building
-) {
-
-    const cell =
-        getCell(
-            building.row,
-            building.col
-        );
-
-    if (!cell) {
-        return;
-    }
-
-    const flash =
-        document.createElement("div");
-
-    flash.className =
-        "attack-flash";
-
-    cell.appendChild(flash);
-
-    setTimeout(() => {
-
-        flash.remove();
-
-    }, 200);
+    setTimeout(
+        () => element.remove(),
+        600
+    );
 }
 
 
-/* =========================================================
-   CLEANUP
-========================================================= */
-
-function cleanupEnemies() {
-
-    const dead =
-        gameState.enemies.filter(
-            enemy =>
-                enemy.hp <= 0
-        );
-
-    if (dead.length > 0) {
-
-        gameState.enemies =
-            gameState.enemies.filter(
-                enemy =>
-                    enemy.hp > 0
-            );
-    }
-
-
-    gameState.buildings =
-        gameState.buildings.filter(
-            building =>
-                building.hp > 0
-        );
-}
-
-
-/* =========================================================
-   WAVE COMPLETION
-========================================================= */
+/* =========================
+   Wave Completion
+========================= */
 
 function checkWaveComplete() {
 
     if (
-        gameState.phase !==
-        "combat"
+        state.phase !== "wave"
     ) {
         return;
     }
 
 
-    const allSpawned =
-        gameState.enemiesSpawned >=
-        gameState.enemiesToSpawn;
-
-
-    const noEnemies =
-        gameState.enemies.length === 0;
-
-
     if (
-        allSpawned &&
-        noEnemies
+        state.waveKills >=
+        state.waveTotal &&
+
+        state.enemies.length === 0
     ) {
 
-        /*
-            Wave cleared.
-        */
+        applyWaveEndIncome();
 
-        if (
-            gameState.wave >=
-            TOTAL_WAVES
-        ) {
-
-            gameState.gameRunning =
-                false;
-
-            gameState.phase =
-                "victory";
-
-            setStatus(
-                "🏆 你成功守住了 Core！"
-            );
-
-            return;
-        }
-
-
-        gameState.wave++;
-
-        gameState.phase =
-            "prepare";
-
-        gameState.nextWaveReady =
-            true;
-
-
-        /*
-            10% interest.
-        */
-
-        const interest =
-            Math.round(
-                gameState.gold *
-                0.10
-            );
-
-        if (
-            interest > 0
-        ) {
-
-            gameState.gold +=
-                interest;
-
-            setStatus(
-                `第 ${gameState.wave - 1} 波完成！利息 +${interest}。准备下一波。`
-            );
-
-        } else {
-
-            setStatus(
-                `第 ${gameState.wave - 1} 波完成！准备下一波。`
-            );
-        }
-
-
-        updateUI();
+        showBuffChoice();
     }
 }
 
 
-/* =========================================================
-   MAIN LOOP
-========================================================= */
+/* =========================
+   Render
+========================= */
 
-function gameLoop(now) {
+function render() {
 
-    if (
-        !gameState.gameRunning
-    ) {
-        render();
-        return;
-    }
-
-
-    const delta =
-        Math.min(
-            now - lastTime,
-            100
+    document
+        .querySelectorAll(".cell")
+        .forEach(
+            cell =>
+                cell.innerHTML = ""
         );
 
-    lastTime =
-        now;
+
+    document
+        .querySelectorAll(".building")
+        .forEach(
+            element =>
+                element.remove()
+        );
+
+
+    document
+        .querySelectorAll(".enemy")
+        .forEach(
+            element =>
+                element.remove()
+        );
 
 
     /*
-        Spawn enemies ONLY during combat.
+        Buildings
     */
 
-    if (
-        gameState.phase ===
-        "combat"
+    for (
+        const building
+        of state.buildings
     ) {
 
-        if (
-            gameState.enemiesSpawned <
-            gameState.enemiesToSpawn
-        ) {
+        const cell =
+            getCell(
+                building.row,
+                building.col
+            );
 
-            if (
-                now -
-                gameState.lastEnemySpawn >=
-                gameState.spawnInterval
-            ) {
 
-                spawnEnemy();
-
-                gameState.lastEnemySpawn =
-                    now;
-            }
+        if (!cell) {
+            continue;
         }
+
+
+        const element =
+            document.createElement(
+                "div"
+            );
+
+
+        element.className =
+            `building ${building.type}`;
+
+
+        element.innerHTML = `
+
+            ${BUILDINGS[
+                building.type
+            ].symbol}
+
+            <div class="building-hp">
+
+                <div
+                    style="
+                        width:
+                        ${Math.max(
+                            0,
+                            building.hp /
+                            building.maxHp *
+                            100
+                        )}%
+                    "
+                ></div>
+
+            </div>
+        `;
+
+
+        element.addEventListener(
+            "click",
+            event => {
+
+                event.stopPropagation();
+
+                showBuildingInfo(
+                    building
+                );
+            }
+        );
+
+
+        cell.appendChild(
+            element
+        );
     }
 
 
-    updateEnemies(
-        delta,
-        now
+    /*
+        Enemies
+    */
+
+    for (
+        const enemy
+        of state.enemies
+    ) {
+
+        const element =
+            document.createElement(
+                "div"
+            );
+
+
+        element.className =
+            `enemy ${enemy.type}`;
+
+
+        element.style.left =
+            `${enemy.x / COLS * 100 - 3.5}%`;
+
+
+        element.style.top =
+            `${enemy.y / ROWS * 100}%`;
+
+
+        element.innerHTML = `
+
+            <div class="enemy-hp">
+
+                <div
+                    style="
+                        width:
+                        ${Math.max(
+                            0,
+                            enemy.hp /
+                            enemy.maxHp *
+                            100
+                        )}%
+                    "
+                ></div>
+
+            </div>
+        `;
+
+
+        board.appendChild(
+            element
+        );
+    }
+
+
+    /*
+        Core HP
+    */
+
+    const coreBar =
+        document.getElementById(
+            "core-hp-bar"
+        );
+
+
+    if (coreBar) {
+
+        coreBar.style.width =
+            `${Math.max(
+                0,
+                state.coreHp /
+                getCoreMaxHp() *
+                100
+            )}%`;
+    }
+
+
+    goldEl.textContent =
+        Math.floor(
+            state.gold
+        );
+
+
+    waveEl.textContent =
+        Math.min(
+            state.wave,
+            TOTAL_WAVES
+        );
+
+
+    const startButton =
+        document.getElementById(
+            "start-wave-btn"
+        );
+
+
+    if (startButton) {
+
+        startButton.disabled =
+            state.phase !== "prepare";
+
+
+        if (
+            state.phase ===
+            "prepare"
+        ) {
+
+            startButton.textContent =
+                `开始第 ${state.wave} 波`;
+        }
+
+        else if (
+            state.phase ===
+            "wave"
+        ) {
+
+            startButton.textContent =
+                "战斗中...";
+        }
+
+        else {
+
+            startButton.textContent =
+                "选择 Buff...";
+        }
+    }
+}
+
+
+/* =========================
+   Reset
+========================= */
+
+function resetGame() {
+
+    state = {
+
+        gold: STARTING_GOLD,
+
+        wave: 1,
+
+        phase: "prepare",
+
+        coreHp: CORE_MAX_HP,
+
+        baseCoreMaxHp:
+            CORE_MAX_HP,
+
+        coreMaxHpMul: 1,
+
+        buildings: [],
+
+        enemies: [],
+
+        selectedBuilding: null,
+
+        nextBuildingId: 1,
+
+        nextEnemyId: 1,
+
+        spawnTimer: 0,
+
+        waveKills: 0,
+
+        waveTotal: 0,
+
+        interestRate: 0.10,
+
+        damageMul: 1,
+
+        attackSpeedMul: 1,
+
+        buildingHpMul: 1,
+
+        goldDropMul: 1,
+
+        economyIncomeMul: 1,
+
+        buildCostMul: 1,
+
+        upgradeCostMul: 1,
+
+        slowMul: 1,
+
+        explosionChance: 0,
+
+        chainChance: 0,
+
+        rangeBonus: 0,
+
+        waveRepair: 0,
+
+        waveBonusGold: 0,
+
+        eliteDamageMul: 1,
+
+        bossDamageMul: 1,
+
+        wallDamageTakenMul: 1,
+
+        destroyRefund: 0,
+
+        lastStand: false,
+
+        gameOver: false,
+
+        victory: false,
+
+        lastTime:
+            performance.now()
+    };
+
+
+    setStatus(
+        "准备开始。你有 500 Gold，可以自由布置基地。"
     );
 
-    updateBuildings(
-        now
-    );
-
-    cleanupEnemies();
-
-    checkWaveComplete();
-
-    updateUI();
 
     render();
+}
+
+
+/* =========================
+   Main Loop
+========================= */
+
+function gameLoop(now) {
+
+    const dt =
+        Math.min(
+            50,
+            now -
+            state.lastTime
+        );
+
+
+    state.lastTime =
+        now;
+
+
+    if (
+        !state.gameOver &&
+        !state.victory &&
+        state.phase === "wave"
+    ) {
+
+        updateEnemies(
+            dt,
+            now
+        );
+
+
+        updateBuildings(
+            dt,
+            now
+        );
+
+
+        checkWaveComplete();
+    }
+
+
+    render();
+
 
     requestAnimationFrame(
         gameLoop
     );
 }
+
+
+/* =========================
+   Start
+========================= */
+
+injectStyles();
+
+createBoard();
+
+setupControls();
+
+setupBuildButtons();
+
+resetGame();
+
+requestAnimationFrame(
+    gameLoop
+);
